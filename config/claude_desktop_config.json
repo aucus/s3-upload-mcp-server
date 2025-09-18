@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "s3-upload": {
+      "command": "python",
+      "args": ["-m", "src.server"],
+      "cwd": "/Users/st/workspace_ai/stunitas_mcp_aws_s3",
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "S3_BUCKET_NAME": "figma-assets-bucket"
+      }
+    }
+  }
+}

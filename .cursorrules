@@ -1,0 +1,334 @@
+# AWS S3 Upload MCP Server - Cursor Rules
+
+## 🎯 프로젝트 개요
+이 프로젝트는 Figma → MCP → HTML → Cursor Rules 워크플로우에서 이미지 파일들을 AWS S3에 자동 업로드하는 MCP 서버를 개발합니다.
+
+## 🏗️ 기술 스택
+- **언어**: Python 3.10+
+- **MCP 프레임워크**: `fastmcp` (고성능 Pythonic MCP 라이브러리)
+- **AWS SDK**: `boto3`
+- **이미지 처리**: `Pillow` (PIL)
+- **비동기 처리**: `asyncio`, `aiohttp`
+- **타입 검증**: `pydantic` (FastMCP 내장)
+- **패키지 관리**: `uv` (권장)
+
+## 📁 프로젝트 구조
+```
+s3-upload-mcp-server/
+├── pyproject.toml
+├── README.md
+├── src/
+│   ├── s3_upload_mcp/
+│   │   ├── __init__.py
+│   │   ├── server.py          # MCP 서버 메인
+│   │   ├── tools.py           # MCP Tools 구현
+│   │   ├── image_processor.py # 이미지 처리 로직
+│   │   └── s3_client.py       # S3 클라이언트 래퍼
+├── tests/
+├── config/
+│   └── claude_desktop_config.json
+└── docs/
+```
+
+## 🔧 핵심 FastMCP Tools 구현
+
+### 1. upload_image_to_s3
+```python
+from fastmcp import FastMCP, Context
+from pydantic import BaseModel
+from typing import Optional
+
+class UploadResponse(BaseModel):
+    success: bool
+    url: Optional[str] = None
+    error: Optional[str] = None
+    metadata: dict
+
+@mcp.tool
+async def upload_image_to_s3(
+    file_path: str,
+    bucket_name: str,
+    key: Optional[str] = None,
+    optimize: bool = True,
+    quality: int = 80,
+    ctx: Context
+) -> UploadResponse:
+    """
+    단일 이미지 파일을 S3에 업로드하고 공개 URL을 반환합니다.
+    
+    Args:
+        file_path: 업로드할 이미지 파일 경로
+        bucket_name: S3 버킷명
+        key: S3 객체 키 (선택사항, 미제공시 자동생성)
+        optimize: 이미지 최적화 여부
+        quality: 압축 품질 (1-100)
+        ctx: FastMCP Context (자동 주입)
+    
+    Returns:
+        UploadResponse: 업로드 결과, URL, 메타데이터
+    """
+    await ctx.info(f"Starting upload of {file_path} to {bucket_name}")
+    # 구현 로직...
+```
+
+### 2. batch_upload_images
+```python
+class BatchUploadResponse(BaseModel):
+    success: bool
+    urls: List[str] = []
+    errors: List[str] = []
+    total_files: int
+    successful_uploads: int
+
+@mcp.tool
+async def batch_upload_images(
+    file_paths: List[str],
+    bucket_name: str,
+    folder_prefix: Optional[str] = None,
+    optimize: bool = True,
+    ctx: Context
+) -> BatchUploadResponse:
+    """
+    여러 이미지를 병렬로 S3에 업로드합니다.
+    
+    Args:
+        file_paths: 업로드할 이미지 파일 경로 리스트
+        bucket_name: S3 버킷명
+        folder_prefix: S3 폴더 프리픽스
+        optimize: 이미지 최적화 여부
+        ctx: FastMCP Context (자동 주입)
+    
+    Returns:
+        BatchUploadResponse: 일괄 업로드 결과
+    """
+    await ctx.info(f"Starting batch upload of {len(file_paths)} files")
+    # 구현 로직...
+```
+
+### 3. list_s3_buckets
+```python
+class BucketListResponse(BaseModel):
+    success: bool
+    buckets: List[str] = []
+    error: Optional[str] = None
+
+@mcp.tool
+async def list_s3_buckets(ctx: Context) -> BucketListResponse:
+    """
+    사용 가능한 S3 버킷 목록을 조회합니다.
+    
+    Args:
+        ctx: FastMCP Context (자동 주입)
+    
+    Returns:
+        BucketListResponse: 버킷 목록
+    """
+    await ctx.info("Fetching S3 bucket list")
+    # 구현 로직...
+```
+
+## 🖼️ 이미지 처리 요구사항
+
+### 지원 포맷
+- PNG, JPG, JPEG, SVG, WebP
+- 자동 WebP 변환 (옵션)
+- 기본 압축 품질 80%
+
+### 이미지 최적화 기능
+```python
+class ImageProcessor:
+    def optimize_image(self, image_path: str, quality: int = 80) -> str:
+        """이미지 최적화 및 WebP 변환"""
+        
+    def resize_image(self, image_path: str, max_width: int = 1920, max_height: int = 1080) -> str:
+        """이미지 리사이징"""
+        
+    def normalize_filename(self, filename: str) -> str:
+        """URL 안전 파일명 생성"""
+```
+
+## ☁️ AWS S3 연동
+
+### 필수 IAM 권한
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectAcl",
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::your-bucket-name",
+        "arn:aws:s3:::your-bucket-name/*"
+      ]
+    }
+  ]
+}
+```
+
+### S3 클라이언트 구현
+```python
+class S3Client:
+    def __init__(self, region: str, bucket_name: str):
+        self.s3_client = boto3.client('s3', region_name=region)
+        self.bucket_name = bucket_name
+    
+    async def upload_file(self, file_path: str, key: str, metadata: dict = None) -> str:
+        """파일 업로드 및 공개 URL 반환"""
+        
+    async def upload_multiple(self, files: List[dict]) -> List[dict]:
+        """병렬 파일 업로드"""
+```
+
+## ⚡ 성능 최적화
+
+### 비동기 처리
+- `asyncio` 기반 동시 업로드
+- 최대 5개 파일 병렬 처리
+- 멀티파트 업로드 (5MB 이상)
+
+### 에러 처리
+- 지수 백오프 알고리즘으로 자동 재시도
+- Circuit Breaker 패턴
+- Graceful Degradation
+
+## 🔒 보안 요구사항
+
+### 환경변수 설정
+```bash
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION=ap-northeast-2
+S3_BUCKET_NAME=your-bucket-name
+```
+
+### 데이터 보안
+- HTTPS/TLS 1.2 이상 전송 암호화
+- S3 server-side encryption
+- 최소 권한 원칙 적용
+
+## 📊 로깅 및 모니터링
+
+### 구조화된 로깅
+```python
+import logging
+import json
+
+logger = logging.getLogger(__name__)
+
+def log_upload_result(file_path: str, success: bool, url: str = None, error: str = None):
+    log_data = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "file_path": file_path,
+        "success": success,
+        "url": url,
+        "error": error
+    }
+    logger.info(json.dumps(log_data))
+```
+
+## 🧪 테스트 요구사항
+
+### 단위 테스트
+- 각 MCP Tool별 테스트
+- 이미지 처리 로직 테스트
+- S3 클라이언트 테스트
+- 목표: 90% 이상 커버리지
+
+### 통합 테스트
+- Claude Desktop 연동 테스트
+- 실제 S3 업로드 테스트
+- 에러 시나리오 테스트
+
+## 📦 패키징 및 배포
+
+### pyproject.toml 설정
+```toml
+[project]
+name = "s3-upload-mcp-server"
+version = "1.0.0"
+description = "AWS S3 Upload MCP Server for Figma assets"
+dependencies = [
+    "fastmcp>=2.12.0",
+    "boto3>=1.34.0",
+    "Pillow>=10.0.0",
+    "aiohttp>=3.9.0",
+    "pydantic>=2.0.0"
+]
+
+[project.scripts]
+s3-upload-mcp-server = "s3_upload_mcp.server:main"
+```
+
+### FastMCP 서버 실행
+```python
+# server.py
+from fastmcp import FastMCP
+from s3_upload_mcp.tools import upload_image_to_s3, batch_upload_images, list_s3_buckets
+
+mcp = FastMCP("S3 Upload Server")
+
+# 도구 등록
+mcp.tool(upload_image_to_s3)
+mcp.tool(batch_upload_images)
+mcp.tool(list_s3_buckets)
+
+if __name__ == "__main__":
+    mcp.run()  # STDIO transport (기본)
+    # 또는 HTTP: mcp.run(transport="http", host="127.0.0.1", port=8000)
+```
+
+### Claude Desktop 설정
+```json
+{
+  "mcpServers": {
+    "s3-upload": {
+      "command": "uv",
+      "args": ["run", "s3-upload-mcp-server"],
+      "env": {
+        "AWS_REGION": "ap-northeast-2",
+        "S3_BUCKET_NAME": "figma-assets-bucket"
+      }
+    }
+  }
+}
+```
+
+## 🎯 개발 가이드라인
+
+### 코드 스타일
+- PEP 8 준수
+- Type hints 필수 사용
+- Docstring Google 스타일
+- 비동기 함수는 `async/await` 사용
+
+### 에러 처리
+- 모든 외부 API 호출에 try-catch 적용
+- 사용자 친화적 에러 메시지
+- 로깅을 통한 디버깅 정보 제공
+
+### 성능 고려사항
+- 메모리 사용량 100MB 이하 유지
+- CPU 사용률 단일 코어 50% 이하
+- 1MB 이미지 기준 3초 이내 업로드
+
+## 🚀 배포 체크리스트
+
+- [ ] 모든 MCP Tools 구현 완료
+- [ ] 단위 테스트 커버리지 90% 이상
+- [ ] 통합 테스트 통과
+- [ ] Claude Desktop 연동 확인
+- [ ] 코드 리뷰 승인
+- [ ] 정적 분석 도구 통과
+- [ ] 보안 스캔 통과
+- [ ] 성능 테스트 기준 달성
+
+## 📞 지원 및 문의
+
+프로젝트 관련 문의사항이나 이슈가 있으시면 언제든지 말씀해 주세요. 
+이 규칙을 따라 개발하시면 안정적이고 확장 가능한 MCP 서버를 구축할 수 있습니다.
