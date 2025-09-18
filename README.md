@@ -23,7 +23,7 @@ A high-performance MCP (Model Context Protocol) server for uploading images to A
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/s3-upload-mcp-server.git
+git clone https://github.com/aucus/s3-upload-mcp-server.git
 cd s3-upload-mcp-server
 
 # Install with uv (recommended)
